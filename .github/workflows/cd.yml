@@ -1,0 +1,25 @@
+name : TWS CD Workflow
+on:
+    workflow_run:
+        workflows: ["TWS CI Workflow"]
+        types: [completed]
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                repository: ${{ secrets.REPOSITORY }}
+                token: ${{ secrets.TOKEN }}
+            - name: Execute remote SSH commands using password
+              uses: appleboy/ssh-action@v1
+              with:
+                host: ${{ secrets.HOST }}
+                username: ${{ secrets.USERNAME }}
+                password: ${{ secrets.PASSWORD }}
+                port: ${{ secrets.PORT }}
+                script:
+                    -cd ~/github-action-demo1
+                    git pull origin main
+                    docker-compose down
+                    docker-compose up -d --build
