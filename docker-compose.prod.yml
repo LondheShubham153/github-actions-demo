@@ -28,7 +28,6 @@ services:
     
   backend:
     image: ${DOCKERHUB_USERNAME}/skillpulse-backend:latest
-    build: ./backend
     restart: always
     networks:
       - skillpulse
@@ -51,7 +50,6 @@ services:
 
   frontend:
     image: ${DOCKERHUB_USERNAME}/skillpulse-frontend:latest
-    build: ./frontend
     restart: always
     networks:
       - skillpulse

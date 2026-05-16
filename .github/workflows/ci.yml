@@ -7,35 +7,127 @@ on:
       - 'k8s/**'
       - 'docs/**'
       - '**/*.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'k8s/**'
+      - 'docs/**'
+      - '**/*.md'
 
 jobs:
-  build-and-push:
+  ci:
+    name: CI + Security + Build + Push
     runs-on: ubuntu-latest
+    env:
+      BACKEND_IMAGE_LATEST: ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-backend:latest' }}
+      BACKEND_IMAGE_SHA: ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-backend:{0}', github.sha) }}
+      FRONTEND_IMAGE_LATEST: ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-frontend:latest' }}
+      FRONTEND_IMAGE_SHA: ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-frontend:{0}', github.sha) }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: docker/setup-buildx-action@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
 
-      - uses: docker/login-action@v4
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run backend tests
+        run: go test ./...
+        working-directory: ./backend
+
+      - name: Run go vet
+        run: go vet ./...
+        working-directory: ./backend
+
+      - name: Install gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Run gosec
+        run: gosec ./...
+
+      - name: Lint backend Dockerfile
+        uses: hadolint/hadolint-action@v2
+        with:
+          dockerfile: backend/Dockerfile
+
+      - name: Lint frontend Dockerfile
+        uses: hadolint/hadolint-action@v2
+        with:
+          dockerfile: frontend/Dockerfile
+
+      - name: Run dependency review
+        uses: github/dependency-review-action@v3
+        with:
+          fail-on-severity: medium
+
+      - name: Run Gitleaks secret scan
+        uses: zricethezav/gitleaks-action@v8
+        with:
+          args: '--path=. --exit-code=1 --verbose'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image for scan
+        run: |
+          docker buildx build --load --cache-from=type=local,src=.buildx-cache \
+            --cache-to=type=local,dest=.buildx-cache,mode=max \
+            -t $BACKEND_IMAGE_LATEST \
+            -t $BACKEND_IMAGE_SHA \
+            ./backend
+
+      - name: Build frontend image for scan
+        run: |
+          docker buildx build --load --cache-from=type=local,src=.buildx-cache \
+            --cache-to=type=local,dest=.buildx-cache,mode=max \
+            -t $FRONTEND_IMAGE_LATEST \
+            -t $FRONTEND_IMAGE_SHA \
+            ./frontend
+
+      - name: Scan backend image with Trivy
+        uses: aquasecurity/trivy-action@v1
+        with:
+          image-ref: $BACKEND_IMAGE_LATEST
+          format: table
+          exit-code: 1
+
+      - name: Scan frontend image with Trivy
+        uses: aquasecurity/trivy-action@v1
+        with:
+          image-ref: $FRONTEND_IMAGE_LATEST
+          format: table
+          exit-code: 1
+
+      - name: Log in to Docker Hub
         if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push backend
-        uses: docker/build-push-action@v7
-        with:
-          context: ./backend
-          push: ${{ vars.DEPLOY_ENABLED == 'true' }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-backend:latest' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-backend:{0}', github.sha) }}
+      - name: Push backend image
+        if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+        run: |
+          docker push $BACKEND_IMAGE_LATEST
+          docker push $BACKEND_IMAGE_SHA
 
-      - name: Build and push frontend
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          push: ${{ vars.DEPLOY_ENABLED == 'true' }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-frontend:latest' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-frontend:{0}', github.sha) }}
+      - name: Push frontend image
+        if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+        run: |
+          docker push $FRONTEND_IMAGE_LATEST
+          docker push $FRONTEND_IMAGE_SHA
