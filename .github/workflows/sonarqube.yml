@@ -1,0 +1,27 @@
+run-name: Code_Security_SonarQube
+
+on:
+  # Trigger analysis when pushing to your main branches, and when creating a pull request.
+  workflow_call: 
+  #push:
+    #branches:
+      #- main
+      #- master
+      #- develop
+      #- 'releases/**'
+  #pull_request:
+      #types: [opened, synchronize, reopened]
+
+name: Main Workflow
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        # Disabling shallow clones is recommended for improving the relevancy of reporting
+        fetch-depth: 0
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v8 # Ex: v4.1.0 or sha1, See the latest version at https://github.com/marketplace/actions/official-sonarqube-scan
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
