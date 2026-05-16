@@ -8,7 +8,7 @@ on:
 
 jobs:
   deploy-stage:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_ENABLED == 'true' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_STAGE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
