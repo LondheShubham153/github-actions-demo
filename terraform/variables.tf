@@ -12,7 +12,7 @@
  }
  variable "instance_type" {
    type = string
-   default = "t3.medium"
+   default = "t2.micro"
  }
  variable "project_name" {
    description = "The name of the project used for resource naming and tagging"
